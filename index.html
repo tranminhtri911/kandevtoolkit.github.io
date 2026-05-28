@@ -1288,9 +1288,18 @@
           <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px">
             Waiting for sender...
           </div>
-          <div style="font-size: 12px; color: var(--text2)">
+          <div
+            style="font-size: 12px; color: var(--text2); margin-bottom: 16px"
+          >
             The sender will see your device and tap to start transfer.
           </div>
+          <button
+            class="btn btn-ghost"
+            onclick="location.reload()"
+            style="font-size: 12px; padding: 8px 16px"
+          >
+            ↺ Reset
+          </button>
         </div>
 
         <!-- Rejected state -->
@@ -1328,11 +1337,54 @@
           </div>
           <div class="stats" id="stats-grid"></div>
           <button class="btn" id="btn-download-all">⬇ Download All</button>
+          <button
+            class="btn btn-secondary"
+            id="btn-receive-more"
+            onclick="receiveMore()"
+            style="display: none"
+          >
+            ＋ Receive More
+          </button>
           <button class="btn btn-ghost" id="btn-new-session">
             Start New Session
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Fixed reload button (bottom-right corner) -->
+    <div
+      id="reload-fab"
+      style="
+        position: fixed;
+        bottom: 20px;
+        right: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 999;
+      "
+    >
+      <button
+        onclick="clearAndReload()"
+        title="Clear cache and reload"
+        style="
+          background: var(--card);
+          border: 1px solid var(--border);
+          color: var(--text2);
+          border-radius: 20px;
+          padding: 6px 12px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+        "
+      >
+        🗑 Clear &amp; Reload
+      </button>
     </div>
 
     <!-- Image lightbox -->
@@ -1354,6 +1406,24 @@
 
     <script>
       const CHUNK_SIZE = 64 * 1024;
+
+      function clearAndReload() {
+        const clear = () => {
+          localStorage.clear();
+          sessionStorage.clear();
+          location.reload();
+        };
+        if ('caches' in window) {
+          caches
+            .keys()
+            .then((names) => {
+              Promise.all(names.map((n) => caches.delete(n))).then(clear);
+            })
+            .catch(clear);
+        } else {
+          clear();
+        }
+      }
 
       /**
        * Wait until the DataChannel send buffer is below the high-water mark.
@@ -1384,6 +1454,33 @@
           }, 50);
           // Safety timeout: prevent hanging if connection closes
           setTimeout(finish, 10000);
+        });
+      }
+
+      /**
+       * Wait until the DataChannel send buffer reaches exactly 0.
+       * Call this before sending a transfer-complete signal so that all file
+       * data has been handed to the network stack before we signal the receiver.
+       */
+      async function waitForBufferFullDrain(conn) {
+        const dc = conn && conn.dataChannel;
+        if (!dc || dc.bufferedAmount === 0) return;
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            clearInterval(poll);
+            dc.removeEventListener('bufferedamountlow', onLow);
+            resolve();
+          };
+          dc.bufferedAmountLowThreshold = 0;
+          const onLow = () => finish();
+          dc.addEventListener('bufferedamountlow', onLow);
+          const poll = setInterval(() => {
+            if (dc.bufferedAmount === 0) finish();
+          }, 50);
+          setTimeout(finish, 30000);
         });
       }
 
@@ -1784,8 +1881,12 @@
           await sendOneFile(file);
         }
 
-        // Done
-        senderConn.close();
+        // Wait for the DataChannel send buffer to fully drain to 0 before
+        // sending the transfer-complete signal. Calling conn.close() immediately
+        // would trigger RTCPeerConnection.close() which abruptly drops
+        // in-flight SCTP data, causing the receiver to miss the last file(s).
+        await waitForBufferFullDrain(senderConn);
+        senderConn.send({ kind: 'transfer-complete' });
         showSendDone();
       }
 
@@ -2118,7 +2219,22 @@
           )
           .join('');
         document.getElementById('summary').classList.add('show');
+        // Show "Receive More" only when connection is still alive
+        const receiveMoreBtn = document.getElementById('btn-receive-more');
+        if (receiveMoreBtn && conn && conn.open) {
+          receiveMoreBtn.style.display = '';
+        }
         setStatus('All files received!', 'connected');
+      }
+
+      function receiveMore() {
+        // Hide summary, reset file list, keep connection alive for next batch
+        document.getElementById('summary').classList.remove('show');
+        document.getElementById('btn-receive-more').style.display = 'none';
+        document.getElementById('files-list').innerHTML = '';
+        receivedFiles = [];
+        startTime = Date.now();
+        setStatus('Waiting for next batch...', 'connecting');
       }
 
       document
@@ -2258,9 +2374,16 @@
               a.click();
               return;
             }
+            if (msg.kind === 'transfer-complete') {
+              // All files in this batch have arrived — show summary.
+              // Keep the connection alive so the sender can send another batch.
+              showSummary();
+              return;
+            }
           });
 
           conn.on('close', () => {
+            // Connection closed unexpectedly or session ended
             if (receivedFiles.length > 0) showSummary();
             else setStatus('Connection closed.', 'error-status');
           });
