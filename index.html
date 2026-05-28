@@ -1149,6 +1149,26 @@
     <script>
       const CHUNK_SIZE = 64 * 1024;
 
+      const ICE_SERVERS = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+      ];
+
       // ─── Mode switching ───
       let currentMode = 'receive';
       function switchMode(mode) {
@@ -1242,12 +1262,7 @@
           .join('');
 
         senderPeer = new Peer(peerId, {
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-            ],
-          },
+          config: { iceServers: ICE_SERVERS },
         });
 
         senderPeer.on('open', () => {
@@ -1684,12 +1699,7 @@
         const senderId = 'devkit-fs-' + pin + '-sender';
 
         peer = new Peer(myId, {
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-            ],
-          },
+          config: { iceServers: ICE_SERVERS },
         });
 
         peer.on('open', () => {
