@@ -1323,9 +1323,9 @@
 
         const timeKey = Math.floor(Date.now() / 300000);
         const slotIds = [];
-        for (const key of [timeKey, timeKey - 1]) {
-          for (let n = 0; n <= 9; n++) slotIds.push(`devkit-slot-${key}-${n}`);
-        }
+        // Only current time window (10 slots) — fewer simultaneous connections
+        for (let n = 0; n <= 9; n++)
+          slotIds.push(`devkit-slot-${timeKey}-${n}`);
 
         const proberId =
           'devkit-prober-' + Math.random().toString(36).slice(2, 9);
@@ -1350,26 +1350,28 @@
         prober.on('open', () => {
           for (const slotId of slotIds) {
             const conn = prober.connect(slotId, {
-              reliable: false,
+              reliable: true,
               serialization: 'json',
             });
-            const t = setTimeout(() => {
+            let slotDone = false;
+            const decrement = () => {
+              if (slotDone) return;
+              slotDone = true;
               remaining--;
               onAllDone();
-            }, 4000);
+            };
+            const t = setTimeout(decrement, 8000);
             conn.on('data', (data) => {
               clearTimeout(t);
-              remaining--;
               if (data.kind === 'announce' && !scanFoundPins.has(data.pin)) {
                 scanFoundPins.add(data.pin);
                 addNearbySender(data.pin, data.deviceName, data.platform);
               }
-              onAllDone();
+              decrement();
             });
             conn.on('error', () => {
               clearTimeout(t);
-              remaining--;
-              onAllDone();
+              decrement();
             });
           }
         });
@@ -1383,8 +1385,8 @@
           if (scanProber) {
             prober.destroy();
             scanProber = null;
-            onAllDone();
             remaining = 0;
+            onAllDone();
           }
         }, 12000);
       }
@@ -1644,7 +1646,7 @@
             kind: 'chunk',
             fileId,
             index: i,
-            data: Array.from(new Uint8Array(buffer)),
+            data: buffer, // ArrayBuffer — binary serialization handles this natively
           });
 
           const pct = Math.round((end / file.size) * 100);
@@ -1985,7 +1987,7 @@
         peer.on('open', () => {
           conn = peer.connect(senderId, {
             reliable: true,
-            serialization: 'json',
+            serialization: 'binary',
           });
 
           conn.on('open', () => {
@@ -2020,9 +2022,8 @@
             if (msg.kind === 'chunk') {
               const entry = receivingBuffers[msg.fileId];
               if (!entry) return;
-              // data is number[] due to JSON serialization
-              const buf = new Uint8Array(msg.data).buffer;
-              entry.chunks[msg.index] = buf;
+              // data arrives as ArrayBuffer via binary (BinaryPack) serialization
+              entry.chunks[msg.index] = msg.data;
               const received = entry.chunks.filter(Boolean).length;
               const pct = Math.round((received / entry.meta.totalChunks) * 100);
               const transferred = Math.min(
