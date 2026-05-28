@@ -1375,7 +1375,11 @@
             });
           }
         });
-        prober.on('error', () => {
+        prober.on('error', (err) => {
+          if (err.type === 'peer-unavailable') {
+            // Expected for empty slots — let per-slot timeout handle it
+            return;
+          }
           prober.destroy();
           scanProber = null;
           document.getElementById('scan-radar-screen').style.display = 'none';
@@ -1707,8 +1711,8 @@
         const timeKey = Math.floor(Date.now() / 300000);
         const slotId = 'devkit-slot-' + timeKey + '-' + n;
         const slot = new Peer(slotId, { config: { iceServers: ICE_SERVERS } });
+        slotPeer = slot; // Assign immediately so resetSend() can clean it up
         slot.on('open', () => {
-          slotPeer = slot;
           slot.on('connection', (conn) => {
             conn.on('open', () =>
               conn.send({ kind: 'announce', pin, deviceName, platform }),
@@ -1717,6 +1721,7 @@
         });
         slot.on('error', (err) => {
           if (err.type === 'unavailable-id') {
+            slotPeer = null;
             slot.destroy();
             registerSenderSlot(pin, deviceName, platform, n + 1);
           }
@@ -2022,8 +2027,11 @@
             if (msg.kind === 'chunk') {
               const entry = receivingBuffers[msg.fileId];
               if (!entry) return;
-              // data arrives as ArrayBuffer via binary (BinaryPack) serialization
-              entry.chunks[msg.index] = msg.data;
+              // Normalize: ArrayBuffer (binary), Uint8Array (PeerJS chunking), or number[] (legacy)
+              const raw = msg.data;
+              entry.chunks[msg.index] = Array.isArray(raw)
+                ? new Uint8Array(raw)
+                : raw; // ArrayBuffer or Uint8Array — Blob accepts both
               const received = entry.chunks.filter(Boolean).length;
               const pct = Math.round((received / entry.meta.totalChunks) * 100);
               const transferred = Math.min(
