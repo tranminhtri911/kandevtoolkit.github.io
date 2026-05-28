@@ -742,6 +742,91 @@
         font-size: 10px;
         color: var(--text3);
       }
+
+      /* ─── Image lightbox ─── */
+      #lightbox {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: rgba(0, 0, 0, 0.88);
+        align-items: center;
+        justify-content: center;
+      }
+      #lightbox.open {
+        display: flex;
+      }
+      .lb-inner {
+        position: relative;
+        max-width: 92vw;
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .lb-img {
+        max-width: 88vw;
+        max-height: 80vh;
+        object-fit: contain;
+        border-radius: 12px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+      }
+      .lb-caption {
+        margin-top: 10px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.6);
+        text-align: center;
+      }
+      .lb-btn {
+        position: absolute;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #fff;
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s;
+      }
+      .lb-btn:hover {
+        background: rgba(99, 102, 241, 0.7);
+      }
+      .lb-close {
+        top: -14px;
+        right: -14px;
+        font-size: 16px;
+      }
+      .lb-prev {
+        left: -18px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .lb-next {
+        right: -18px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .btn-view {
+        width: 20px;
+        height: 20px;
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        padding: 0;
+        flex-shrink: 0;
+      }
+      .btn-view:hover {
+        background: var(--accent-glow);
+      }
     </style>
   </head>
   <body>
@@ -1250,6 +1335,23 @@
       </div>
     </div>
 
+    <!-- Image lightbox -->
+    <div id="lightbox" onclick="closeLightbox()">
+      <div class="lb-inner" onclick="event.stopPropagation()">
+        <button class="lb-btn lb-close" onclick="closeLightbox()">
+          &#x2715;
+        </button>
+        <button class="lb-btn lb-prev" id="lb-prev" onclick="lbNav(-1)">
+          &#x2039;
+        </button>
+        <button class="lb-btn lb-next" id="lb-next" onclick="lbNav(1)">
+          &#x203a;
+        </button>
+        <img class="lb-img" id="lb-img" src="" alt="" />
+        <div class="lb-caption" id="lb-caption"></div>
+      </div>
+    </div>
+
     <script>
       const CHUNK_SIZE = 64 * 1024;
 
@@ -1291,6 +1393,47 @@
           credential: 'openrelayproject',
         },
       ];
+
+      // ─── Image lightbox ───
+      let lbImages = []; // { url, name } for all received images
+
+      function openLightbox(url) {
+        const idx = lbImages.findIndex((i) => i.url === url);
+        lbCurrentIdx = idx >= 0 ? idx : 0;
+        renderLightbox();
+        document.getElementById('lightbox').classList.add('open');
+      }
+      let lbCurrentIdx = 0;
+      function renderLightbox() {
+        const img = lbImages[lbCurrentIdx];
+        document.getElementById('lb-img').src = img ? img.url : '';
+        document.getElementById('lb-img').alt = img ? img.name : '';
+        const cap = img
+          ? img.name +
+            (lbImages.length > 1
+              ? `  ${lbCurrentIdx + 1} / ${lbImages.length}`
+              : '')
+          : '';
+        document.getElementById('lb-caption').textContent = cap;
+        document.getElementById('lb-prev').style.display =
+          lbImages.length > 1 ? '' : 'none';
+        document.getElementById('lb-next').style.display =
+          lbImages.length > 1 ? '' : 'none';
+      }
+      function lbNav(dir) {
+        lbCurrentIdx = (lbCurrentIdx + dir + lbImages.length) % lbImages.length;
+        renderLightbox();
+      }
+      function closeLightbox() {
+        document.getElementById('lightbox').classList.remove('open');
+      }
+      document.addEventListener('keydown', (e) => {
+        if (!document.getElementById('lightbox').classList.contains('open'))
+          return;
+        if (e.key === 'Escape') closeLightbox();
+        if (e.key === 'ArrowLeft') lbNav(-1);
+        if (e.key === 'ArrowRight') lbNav(1);
+      });
 
       // ─── Mode switching ───
       let currentMode = 'receive';
@@ -1924,7 +2067,7 @@
             formatBytes(transferred) + ' / ' + formatBytes(total);
       }
 
-      function markFileDone(fileId, size) {
+      function markFileDone(fileId, size, fileType, fileUrl) {
         const item = document.getElementById('fi-' + fileId);
         const fill = document.getElementById('pf-' + fileId);
         const sz = document.getElementById('size-' + fileId);
@@ -1933,7 +2076,18 @@
           fill.style.width = '100%';
           fill.classList.add('done');
         }
-        if (sz) sz.textContent = formatBytes(size) + ' ✓';
+        if (sz) {
+          sz.textContent = formatBytes(size) + ' ✓';
+          // Add View button for images
+          if (fileType && fileType.startsWith('image/') && fileUrl) {
+            const btn = document.createElement('button');
+            btn.className = 'btn-view';
+            btn.title = 'View image';
+            btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+            btn.onclick = () => openLightbox(fileUrl);
+            sz.parentElement.appendChild(btn);
+          }
+        }
       }
 
       function showSummary() {
@@ -2075,11 +2229,16 @@
                 id: entry.meta.id,
                 name: entry.meta.name,
                 size: entry.meta.size,
+                type: entry.meta.type,
                 blob,
                 url,
               });
+              // Track images for lightbox
+              if (entry.meta.type && entry.meta.type.startsWith('image/')) {
+                lbImages.push({ url, name: entry.meta.name });
+              }
               delete receivingBuffers[msg.fileId];
-              markFileDone(msg.fileId, entry.meta.size);
+              markFileDone(msg.fileId, entry.meta.size, entry.meta.type, url);
               const a = document.createElement('a');
               a.href = url;
               a.download = entry.meta.name;
