@@ -1832,6 +1832,12 @@
           digits[i].value = c;
         });
         checkPinComplete();
+        // Auto-connect if opened via QR code (?auto=1)
+        if (new URLSearchParams(location.search).get('auto') === '1') {
+          // Switch to receive tab and connect after page settles
+          switchMode('receive');
+          setTimeout(() => connect(), 800);
+        }
       }
 
       // ─── State ───
