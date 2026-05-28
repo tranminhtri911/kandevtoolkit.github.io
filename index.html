@@ -655,6 +655,59 @@
         color: var(--accent);
         font-size: 14px;
       }
+
+      /* ─── Scanning animation ─── */
+      .scan-radar {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        position: relative;
+        margin: 0 auto 16px;
+      }
+      .scan-radar::before,
+      .scan-radar::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 2px solid var(--accent);
+        opacity: 0;
+        animation: radar-ping 2s ease-out infinite;
+      }
+      .scan-radar::after {
+        animation-delay: 1s;
+      }
+      .scan-radar-center {
+        position: absolute;
+        inset: 50%;
+        transform: translate(-50%, -50%);
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        box-shadow: 0 0 20px var(--accent-glow);
+      }
+      @keyframes radar-ping {
+        0% {
+          transform: scale(0.4);
+          opacity: 0.8;
+        }
+        100% {
+          transform: scale(1.8);
+          opacity: 0;
+        }
+      }
+      .scan-device-count {
+        text-align: center;
+        font-size: 11px;
+        color: var(--text2);
+        font-weight: 600;
+        margin-bottom: 16px;
+      }
     </style>
   </head>
   <body>
@@ -777,23 +830,26 @@
           </div>
 
           <div id="send-devices-section" class="hidden">
-            <div class="field-label" style="margin-bottom: 8px">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-              >
-                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              Devices found — tap to send
+            <div class="scan-device-count" id="scan-device-count">
+              0 devices found
             </div>
             <div id="send-device-list"></div>
+          </div>
+
+          <div id="send-scan-radar">
+            <div class="scan-radar">
+              <div class="scan-radar-center">📡</div>
+            </div>
+            <div
+              style="
+                text-align: center;
+                font-size: 12px;
+                color: var(--text2);
+                font-weight: 600;
+              "
+            >
+              Scanning for devices...
+            </div>
           </div>
 
           <button
@@ -1226,11 +1282,20 @@
       function renderSenderDevices() {
         const section = document.getElementById('send-devices-section');
         const list = document.getElementById('send-device-list');
+        const radar = document.getElementById('send-scan-radar');
+        const countEl = document.getElementById('scan-device-count');
         if (senderPendingConns.size === 0) {
           section.classList.add('hidden');
+          if (radar) radar.style.display = '';
           return;
         }
         section.classList.remove('hidden');
+        if (radar) radar.style.display = 'none';
+        countEl.textContent =
+          senderPendingConns.size +
+          ' device' +
+          (senderPendingConns.size > 1 ? 's' : '') +
+          ' found — tap to send';
         list.innerHTML = '';
         senderPendingConns.forEach((conn, peerId) => {
           // Extract deviceName from hello msg stored on conn
@@ -1628,7 +1693,10 @@
         });
 
         peer.on('open', () => {
-          conn = peer.connect(senderId, { reliable: true });
+          conn = peer.connect(senderId, {
+            reliable: true,
+            serialization: 'json',
+          });
 
           conn.on('open', () => {
             conn.send({ kind: 'hello', deviceName, platform });
