@@ -1253,6 +1253,25 @@
     <script>
       const CHUNK_SIZE = 64 * 1024;
 
+      /**
+       * Wait until the DataChannel send buffer is below the high-water mark.
+       * Prevents the ~16MB WebRTC buffer from overflowing and silently dropping
+       * the connection mid-transfer.
+       */
+      async function waitForBufferDrain(conn) {
+        const HIGH_WATER = 4 * 1024 * 1024; // 4 MB
+        const dc = conn && conn.dataChannel;
+        if (!dc || dc.bufferedAmount <= HIGH_WATER) return;
+        await new Promise((resolve) => {
+          dc.bufferedAmountLowThreshold = HIGH_WATER;
+          const onLow = () => {
+            dc.removeEventListener('bufferedamountlow', onLow);
+            resolve();
+          };
+          dc.addEventListener('bufferedamountlow', onLow);
+        });
+      }
+
       const ICE_SERVERS = [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
@@ -1646,6 +1665,12 @@
           const start = i * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, file.size);
           const buffer = await file.slice(start, end).arrayBuffer();
+
+          // Wait for the DataChannel buffer to drain before sending each chunk.
+          // Without this the ~16MB WebRTC buffer fills instantly and the
+          // connection silently drops — receiver stops at 10-20%.
+          await waitForBufferDrain(senderConn);
+
           senderConn.send({
             kind: 'chunk',
             fileId,
@@ -1659,8 +1684,6 @@
           if (fill) fill.style.width = pct + '%';
           if (sz)
             sz.textContent = formatBytes(end) + ' / ' + formatBytes(file.size);
-
-          await new Promise((r) => setTimeout(r, 0));
         }
 
         senderConn.send({ kind: 'done', fileId });
